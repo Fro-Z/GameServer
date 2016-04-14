@@ -8,6 +8,8 @@ using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
 
+using LeagueSandbox.GameServer;
+
 namespace LeagueSandbox.GameServer.Logic.GameObjects
 {
     class Pathfinder
@@ -65,8 +67,11 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
                     path.error = PathError.PATH_ERROR_OUT_OF_TRIES;
                     oot++;
                     //CORE_WARNING("PATH_ERROR_OUT_OF_TRIES");
-                    path.waypoints = job.reconstructUnfinishedPath();
-                    job.cleanPath(path);
+                    List<Vector2i> rawPath = job.reconstructUnfinishedPath();
+
+                    job.cleanPath(rawPath);
+                    path.waypoints = job.pathToPosition(rawPath); 
+
                     job.cleanLists();
                     return path;
                 }
@@ -75,8 +80,12 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
                     path.error = PathError.PATH_ERROR_NONE;
                     successes++;
                     //CORE_INFO("We finished a path.");
-                    path.waypoints = job.reconstructPath();
-                    job.cleanPath(path);
+
+                    List<Vector2i> rawPath = job.reconstructPath();
+
+                    job.cleanPath(rawPath);
+                    path.waypoints = job.pathToPosition(rawPath);
+               
                     job.cleanLists();
                     return path;
                 }
@@ -91,7 +100,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             empties++;
             path.waypoints = new List<Vector2>();
             path.waypoints.Add(from);
-            job.cleanPath(path);
+
             job.cleanLists();
             return path;
         }
@@ -220,26 +229,23 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             return (position / (float)PATH_DEFAULT_BOX_SIZE(mesh.getSize()));
         }
 
-        /// <summary>
-        /// Reconstruct path from last closed node back to the origin.
-        /// </summary>
-        /// <returns>List of waypoint coordinates</returns>
-        public List<Vector2> reconstructPath()
+
+        private List<Vector2i> reconstructPathFromNode(PathNode last)
         {
-            List<Vector2> ret = new List<Vector2>();
-            if (closedList.Count() == 0)
+
+            List<Vector2i> ret = new List<Vector2i>();
+            if (last == null)
             {
-                Logger.LogCoreWarning("Tried to reconstruct path from 0 nodes!");
+                Logger.LogCoreWarning("Tried to reconstruct path from invalid node!");
                 return ret;
             }
-               
-            PathNode last = closedList.Last();
+
             //Note: last node of closedList is either destination node, or the closest node by 
 
             //go through node parents back to the first node
-            do 
+            do
             {
-                ret.Add(fromGridToPosition(new Vector2(last.x,last.y)));
+                ret.Add(new Vector2i(last.x, last.y));
                 last = last.parent;
             } while (last.parent != null);
 
@@ -248,37 +254,85 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             return ret;
         }
 
-        public List<Vector2> reconstructUnfinishedPath()
+        /// <summary>
+        /// Reconstruct path from last closed node back to the origin.
+        /// </summary>
+        /// <returns>List of waypoint coordinates</returns>
+        public List<Vector2i> reconstructPath()
         {
-            //TODO: find best node, array was not sorted yet!
-            return reconstructPath(); 
-
-            List<Vector2> ret = new List<Vector2>();
-
-            var a = closedList.ToList();
-            a.Reverse();
-            PathNode pathnode = null;
-
-            var lowestG = 9e7;
-            foreach (var i in a)
+            if(closedList.Count()==0)
             {
-                if (i.g < lowestG)
-                {
-                    lowestG = i.g;
-                    pathnode = i;
-                }
+                Logger.LogCoreWarning("Tried to reconstruct path from 0 nodes!");
+                return new List<Vector2i>();
             }
-            if (pathnode != null)
-                a.RemoveRange(0, a.IndexOf(pathnode) + 1);
-
-            foreach (var i in a)
-                ret.Add(fromGridToPosition(new Vector2(i.x, i.y)));
-
-            return ret;
+            else
+                return reconstructPathFromNode(closedList.Last());
         }
-        public void cleanPath(Path path)
+           
+
+        public List<Vector2i> reconstructUnfinishedPath()
+        {
+            //find node with best score (most likely to be closest to target)
+
+            PathNode pathnode = null;
+            var lowestScore = 9e7;
+
+            foreach (PathNode node in closedList)
+             {
+                 if (node.g+node.h < lowestScore)
+                 {
+                     lowestScore = node.g+node.h;
+                     pathnode = node;
+                 }
+             }
+            
+             return reconstructPathFromNode(pathnode);
+           
+        }
+
+        /// <summary>
+        /// Cleans a path, removing unneeded waypoints
+        /// </summary>
+        /// <param name="path">list of grid coordinates</param>
+        public void cleanPath(List<Vector2i> path)
         {
             return;
+
+          if (path.Count() < 2) return;
+
+          int startSize = path.Count();
+          //CORE_WARNING("Cleaning path.. Current size is %d", startSize);
+
+          int dirX = 0, dirY = 0;
+          int lastIndex = 0;
+          var prevPoint = path[lastIndex];
+         
+
+          for (var currentPoint = path[++lastIndex]; lastIndex<path.Count(); )
+          {
+              //Is waypoint in the same direction?
+              if ((currentPoint.x - prevPoint.x == dirX) &&
+                 (currentPoint.y - prevPoint.y == dirY))
+              {
+                    path.Remove(prevPoint);
+                 // path.waypoints.erase(prevPoint);
+                 // CORE_WARNING("Erased a waypoint");
+              }
+              else
+              {
+                  //Update direction change
+                  dirX = currentPoint.x - prevPoint.x;
+                  dirY = currentPoint.y - prevPoint.y;
+              }
+
+              prevPoint = currentPoint;
+          }
+
+         // CORE_WARNING("Done cleaning. New size is %d", path.waypoints.size());
+         if (startSize != path.Count())
+            Logger.LogCoreWarning("Removed %d nodes"+ (startSize - path.Count()));
+
+
             /* if (path.waypoints.size() < 2) return;
              int startSize = path.waypoints.size();
              CORE_WARNING("Cleaning path.. Current size is %d", startSize);
@@ -513,6 +567,17 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
         {
             return map_size / (float)GRID_SIZE;
         }
+
+        public List<Vector2> pathToPosition(List<Vector2i> rawPath)
+        {
+            List<Vector2> ret = new List<Vector2>();
+            foreach (Vector2i gridPos in rawPath)
+            {
+                ret.Add(fromGridToPosition(new Vector2(gridPos.x, gridPos.y)));
+            }
+            return ret;
+        }
+
     }
     class Grid
     {

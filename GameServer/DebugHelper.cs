@@ -87,10 +87,12 @@ namespace LeagueSandbox
            try
            {
                 bitmap.Save("C:/mapImage.png");
+                Logger.LogCoreInfo("Saved path waypoint route to C:/mapImage.png");
             }
            catch (System.Exception ex)
            {
                 Logger.LogCoreError("Could not save debug bitmap"+ex);
+                
            }
             
            

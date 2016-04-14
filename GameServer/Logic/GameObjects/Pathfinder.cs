@@ -82,9 +82,11 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             if (debugOutput)
                 Logger.LogCoreInfo("Going through openlist. Tries: " + tries + " | Objects on list: " + job.openList.Count);
 
-            //CORE_WARNING("PATH_ERROR_OPENLIST_EMPTY");
+            //OpenList is now empty, most likely caused by searching for a path from invalid location
+            Logger.LogCoreWarning("PATH_ERROR_OPENLIST_EMPTY from:" + job.start + " to:" + job.destination);
             path.error = PathError.PATH_ERROR_OPENLIST_EMPTY;
             empties++;
+            path.waypoints = new List<Vector2>();
             path.waypoints.Add(from);
             job.cleanPath(path);
             job.cleanLists();
@@ -180,20 +182,39 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             return (position / (float)PATH_DEFAULT_BOX_SIZE(mesh.getSize()));
         }
 
+        /// <summary>
+        /// Reconstruct path from last closed node back to the origin.
+        /// </summary>
+        /// <returns>List of waypoint coordinates</returns>
         public List<Vector2> reconstructPath()
         {
             List<Vector2> ret = new List<Vector2>();
-            var i = closedList.ToList();
-            i.Reverse();
+            if (closedList.Count() == 0)
+            {
+                Logger.LogCoreWarning("Tried to reconstruct path from 0 nodes!");
+                return ret;
+            }
+               
+            PathNode last = closedList.Last();
+            //Note: last node of closedList is either destination node, or the closest node by 
 
-            foreach (var v in i)
-                ret.Add(fromGridToPosition(new Vector2(v.x, v.y)));
+            //go through node parents back to the first node
+            do 
+            {
+                ret.Add(fromGridToPosition(new Vector2(last.x,last.y)));
+                last = last.parent;
+            } while (last.parent != null);
+
+            ret.Reverse();
 
             return ret;
         }
 
         public List<Vector2> reconstructUnfinishedPath()
         {
+            //TODO: find best node, array was not sorted yet!
+            return reconstructPath(); 
+
             List<Vector2> ret = new List<Vector2>();
 
             var a = closedList.ToList();
@@ -257,7 +278,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             // This sorts every iteration, which means that everything but the last couple of elements are sorted.
             // TODO: That means, this can probably be optimised. Sort only the last elements and add them into the vector where they belong.
             // But honestly, it's running pretty fast so why bother
-            openList.Sort((a, b) => (a.g + a.h).CompareTo(b.g + b.h));
+            openList.Sort((a, b) => (b.g + b.h).CompareTo(a.g + a.h));
 
 
             PathNode currentNode = openList.Last();
@@ -298,11 +319,21 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             closedList.Add(currentNode);
             return atDestination;
         }
+
+        /// <summary>
+        /// Calculates squared distance between two points
+        /// </summary>
+        /// <returns>Squared distance</returns>
         public float CALC_H(float CURX, float CURY, float ENDX, float ENDY)
         {
             return Math.Abs(CURX - ENDX) + Math.Abs(CURY - ENDY);
         }
-
+        /// <summary>
+        /// Calculates grid distance
+        /// (Parent's distance + 1)
+        /// </summary>
+        /// <param name="PARENT_G">grid distance of parent node</param>
+        /// <returns></returns>
         public float CALC_G(float PARENT_G)
         {
             return PARENT_G + 1;

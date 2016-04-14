@@ -18,7 +18,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
         protected static int totalDuration = 0, durations = 0;
         protected static DateTime g_Clock = System.DateTime.Now;
         protected static bool debugOutput = false;
-        protected static int MAX_PATHFIND_TRIES = 100;
+        protected static int MAX_PATHFIND_TRIES = 1000;
 
         public Pathfinder()/*:mesh(0),chart(0)*/ { }
 
@@ -59,6 +59,9 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
 
                 if (tries == MAX_PATHFIND_TRIES)
                 {
+                  //  LeagueSandbox.GameDeubgger.getInstance().PingAtLocation(job.fromGridToPosition(job.start), Core.Logic.PacketHandlers.Packets.Pings.Ping_Assist);
+                  //  LeagueSandbox.GameDeubgger.getInstance().PingAtLocation(job.fromGridToPosition(job.destination), Core.Logic.PacketHandlers.Packets.Pings.Ping_Assist);
+
                     path.error = PathError.PATH_ERROR_OUT_OF_TRIES;
                     oot++;
                     //CORE_WARNING("PATH_ERROR_OUT_OF_TRIES");
@@ -117,6 +120,41 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
         {
             return map_size / (float)GRID_SIZE;
         }
+        /// <summary>
+        /// Returns all occupied points in area. (Used for debug)
+        /// </summary>
+        /// <param name="position"></param>
+        /// <returns></returns>
+        public static List<Vector2> GetOccupiedPoints(Vector2 position)
+        {
+            PathJob job = new PathJob();
+            job.insertObstructions(chart, getMesh()); // Ready the map.
+
+            const float step = 60;
+            const int stepCount = 30;
+
+            List<Vector2> pointsToTest = new List<Vector2>();
+
+            Vector2 start = new Vector2(position.X - (stepCount / 2) * step, position.Y - (stepCount / 2));
+            //generate points for test
+            for (int i=0;i<stepCount;i++)
+                for(int j=0;j<stepCount;j++)
+                {
+                    Vector2 point = start + new Vector2(i * step, j * step);
+                    pointsToTest.Add(point);
+                }
+
+            List<Vector2> result = new List<Vector2>();
+            foreach (Vector2 point in pointsToTest)
+            {
+                Vector2 transformed = job.fromPositionToGrid(point);
+                if (job.isGridNodeOccupied(transformed))
+                    result.Add(point);
+
+            }
+            return result;
+        }
+
     }
     class Path
     {
@@ -284,6 +322,10 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             PathNode currentNode = openList.Last();
             openList.RemoveAt(openList.Count - 1);
 
+
+            //DEBUG ping at this node
+          //  LeagueSandbox.GameDeubgger.getInstance().PingAtLocation(fromGridToPosition(new Vector2(currentNode.x, currentNode.y)), Core.Logic.PacketHandlers.Packets.Pings.Ping_Assist);
+
             bool atDestination = (Math.Abs(currentNode.x - (int)destination.X) <= 1 && Math.Abs(currentNode.y - (int)destination.Y) <= 1);
 
             if (!atDestination) // While we're not there
@@ -396,7 +438,8 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
                         {
                             Vector2 translated = fromGridToPosition(new Vector2(x, y));
                             if (!mesh.isWalkable(translated.X, translated.Y)) // If there's nothing at this position
-                                map[x, y].occupied = true; // This is obstructed
+                                map[x, y].occupied = true; // This is obstructed   
+
                         }
             }
 

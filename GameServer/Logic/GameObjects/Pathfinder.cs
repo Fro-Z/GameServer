@@ -69,8 +69,8 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
                     //CORE_WARNING("PATH_ERROR_OUT_OF_TRIES");
                     List<Vector2i> rawPath = job.reconstructUnfinishedPath();
 
-                    job.cleanPath(rawPath);
-                    path.waypoints = job.pathToPosition(rawPath); 
+                    job.cleanPath(ref rawPath);
+                    path.waypoints = job.pathToPosition(ref rawPath); 
 
                     job.cleanLists();
                     return path;
@@ -83,8 +83,8 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
 
                     List<Vector2i> rawPath = job.reconstructPath();
 
-                    job.cleanPath(rawPath);
-                    path.waypoints = job.pathToPosition(rawPath);
+                    job.cleanPath(ref rawPath);
+                    path.waypoints = job.pathToPosition(ref rawPath);
                
                     job.cleanLists();
                     return path;
@@ -294,71 +294,52 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
         /// Cleans a path, removing unneeded waypoints
         /// </summary>
         /// <param name="path">list of grid coordinates</param>
-        public void cleanPath(List<Vector2i> path)
+        public void cleanPath(ref List<Vector2i> path)
         {
-            return;
-
-          if (path.Count() < 2) return;
-
-          int startSize = path.Count();
-          //CORE_WARNING("Cleaning path.. Current size is %d", startSize);
-
-          int dirX = 0, dirY = 0;
-          int lastIndex = 0;
-          var prevPoint = path[lastIndex];
          
+            if (path.Count() < 2) return;
 
-          for (var currentPoint = path[++lastIndex]; lastIndex<path.Count(); )
-          {
-              //Is waypoint in the same direction?
-              if ((currentPoint.x - prevPoint.x == dirX) &&
-                 (currentPoint.y - prevPoint.y == dirY))
-              {
-                    path.Remove(prevPoint);
-                 // path.waypoints.erase(prevPoint);
-                 // CORE_WARNING("Erased a waypoint");
-              }
-              else
-              {
-                  //Update direction change
-                  dirX = currentPoint.x - prevPoint.x;
-                  dirY = currentPoint.y - prevPoint.y;
-              }
+            int startSize = path.Count();
+            //CORE_WARNING("Cleaning path.. Current size is %d", startSize);
 
-              prevPoint = currentPoint;
-          }
+            int lastDirX = 0, lastDirY = 0;
+            var prevPoint = path[0];
 
-         // CORE_WARNING("Done cleaning. New size is %d", path.waypoints.size());
-         if (startSize != path.Count())
-            Logger.LogCoreWarning("Removed %d nodes"+ (startSize - path.Count()));
+            List<Vector2i> cleanedPath = new List<Vector2i>();
+            cleanedPath.Add(prevPoint);
 
+            for (int i = 1; i<path.Count() ; i++)
+            {
+                Vector2i currentPoint = path[i];
 
-            /* if (path.waypoints.size() < 2) return;
-             int startSize = path.waypoints.size();
-             CORE_WARNING("Cleaning path.. Current size is %d", startSize);
+                int dirX = currentPoint.x - prevPoint.x;
+                int dirY = currentPoint.y - prevPoint.y;
 
-             int dirX = 0, dirY = 0;
-             auto prevPoint = path.waypoints.begin();
-             for (auto i = path.waypoints.begin() + 1; i != path.waypoints.end(); i++)
-             {
-                 if (((*i).X - (*prevPoint).X == dirX) &&
-                    ((*i).Y - (*prevPoint).Y == dirY))
-                 {
-                     path.waypoints.erase(prevPoint);
-                     CORE_WARNING("Erased a waypoint");
-                 }
-                 else
-                 {
-                     dirX = ((*i).X - (*prevPoint).X);
-                     dirY = ((*i).Y - (*prevPoint).Y);
-                 }
+                //Is waypoint in the same direction?
+                if ((dirX==lastDirX) && (dirY==lastDirY))
+                {
+                    //waypoint in the same direction, last waypoint was not needed
+                    cleanedPath.RemoveAt(cleanedPath.Count - 1);
+                    cleanedPath.Add(currentPoint);
+                }
+                else
+                {
+                    //Update direction change
+                    lastDirX = dirX;
+                    lastDirY = dirY;
+                    //Keep the waypoint
 
-                 prevPoint = i;
-             }
+                    cleanedPath.Add(currentPoint);
+                }
 
-             CORE_WARNING("Done cleaning. New size is %d", path.waypoints.size());
-             if (startSize != path.waypoints.size())
-                 CORE_WARNING("Removed %d nodes", startSize - path.waypoints.size());*/
+                prevPoint = currentPoint;
+            }
+
+            // CORE_WARNING("Done cleaning. New size is %d", path.waypoints.size());
+            if (startSize != path.Count())
+                Logger.LogCoreWarning("Removed %d nodes"+ (startSize - path.Count()));
+
+            path = cleanedPath;
         }
         public bool traverseOpenList(bool first)
         {
@@ -568,7 +549,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             return map_size / (float)GRID_SIZE;
         }
 
-        public List<Vector2> pathToPosition(List<Vector2i> rawPath)
+        public List<Vector2> pathToPosition(ref List<Vector2i> rawPath)
         {
             List<Vector2> ret = new List<Vector2>();
             foreach (Vector2i gridPos in rawPath)

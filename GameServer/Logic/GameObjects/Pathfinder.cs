@@ -159,7 +159,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             List<Vector2> result = new List<Vector2>();
             foreach (Vector2 point in pointsToTest)
             {
-                Vector2 transformed = job.fromPositionToGrid(point);
+                Vector2i transformed = job.fromPositionToGrid(point);
                 if (job.isGridNodeOccupied(transformed))
                     result.Add(point);
 
@@ -198,7 +198,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
         private BitArray closedListMask;
 
         public Grid[,] map = new Grid[GRID_WIDTH, GRID_HEIGHT];
-        public Vector2 start, destination;
+        public Vector2i start, destination;
 
         public PathJob()
         {
@@ -207,8 +207,8 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             openListMask = new BitArray(GRID_WIDTH * GRID_HEIGHT);
             closedListMask = new BitArray(GRID_WIDTH * GRID_HEIGHT);
 
-            start = new Vector2();
-            destination = new Vector2();
+            start = new Vector2i();
+            destination = new Vector2i();
             for (var i = 0; i < GRID_WIDTH; i++)
                 for (var j = 0; j < GRID_HEIGHT; j++)
                     map[i, j] = new Grid();
@@ -231,16 +231,16 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             return position * PATH_DEFAULT_BOX_SIZE(mesh.getSize());
         }
 
-        public Vector2 fromPositionToGrid(Vector2 position)
+        public Vector2i fromPositionToGrid(Vector2 position)
         {
             AIMesh mesh = Pathfinder.getMesh();
             if (mesh == null)
             {
                 Logger.LogCoreError("Tried to get a position without an initialised AIMesh!");
-                return new Vector2();
+                return new Vector2i();
             }
 
-            return (position / (float)PATH_DEFAULT_BOX_SIZE(mesh.getSize()));
+            return new Vector2i(position / (float)PATH_DEFAULT_BOX_SIZE(mesh.getSize()));
         }
 
 
@@ -330,8 +330,8 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             {
                 Vector2i currentPoint = path[i];
 
-                int dirX = currentPoint.x - prevPoint.x;
-                int dirY = currentPoint.y - prevPoint.y;
+                int dirX = currentPoint.X - prevPoint.X;
+                int dirY = currentPoint.Y - prevPoint.Y;
 
                 //Is waypoint in the same direction?
                 if ((dirX==lastDirX) && (dirY==lastDirY))
@@ -389,12 +389,13 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
                                     PathNode conflictingNode = isNodeOpen(currentNode.x + dx, currentNode.y + dy); // Nothing is here, did we already add this to the open list?
                                     if (conflictingNode == null) // We did not, add it
                                     {
-                                        addToOpenList(new Vector2(currentNode.x + dx, currentNode.y + dy), currentNode);
+                                        addToOpenList(new Vector2i(currentNode.x + dx, currentNode.y + dy), currentNode);
                                     }
-                                    else if (conflictingNode.g > CALC_G(currentNode.g)) // I found a shorter route to this node.
+                                    else if (conflictingNode.g > calcNodeDist(conflictingNode.position, currentNode.position, currentNode.g)) // I found a shorter route to this node.
                                     {
                                         conflictingNode.setParent(currentNode); // Give it a new parent
-                                        conflictingNode.setScore((int)CALC_H(conflictingNode.x, conflictingNode.y, destination.X, destination.Y), (int)CALC_G(currentNode.g)); // set the new score.
+                                        float nodeDist = calcNodeDist(conflictingNode.position, currentNode.position, currentNode.g);
+                                        conflictingNode.setScore(CALC_H(conflictingNode.x, conflictingNode.y, destination.X, destination.Y), nodeDist); // set the new score.
                                     }
                                 }
                             }
@@ -421,14 +422,22 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             return (float)Math.Pow(Math.Sqrt(distX*distX + distY*distY),1.5f);
         }
         /// <summary>
-        /// Calculates grid distance
-        /// (Parent's distance + 1)
+        /// Calculates grid distance from origin node
+        /// (Parent's distance + 1) or +sqrt(2) if diagonal
         /// </summary>
         /// <param name="PARENT_G">grid distance of parent node</param>
         /// <returns></returns>
-        public float CALC_G(float PARENT_G)
+        public float calcNodeDist(Vector2i nodePos, Vector2i parentPos,float parentDist)
         {
-            return PARENT_G + 1;
+            if(nodePos.X==parentPos.X ||nodePos.Y==parentPos.Y)
+            {
+                return parentDist + 1;
+            }
+            else
+            { //movement was diagonal
+                return parentDist + (float)Math.Sqrt(2);
+            }
+            
         }
 
         public void addRealPosToOpenList(Vector2 position, PathNode parent)
@@ -436,9 +445,14 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             addGridPosToOpenList(fromPositionToGrid(position), parent);
         }
 
-        public void addGridPosToOpenList(Vector2 position, PathNode parent)
+        public void addGridPosToOpenList(Vector2i position, PathNode parent)
         {
-            PathNode node = new PathNode(position, (int)CALC_G((parent != null) ? (parent.g) : (0)), (int)CALC_H(position.X, position.Y, destination.X, destination.Y), parent);
+            float nodeDist = 0;
+
+            if(parent!=null)
+                nodeDist = calcNodeDist(position,parent.position,parent.g);
+
+            PathNode node = new PathNode(position, nodeDist, (int)CALC_H(position.X, position.Y, destination.X, destination.Y), parent);
             int nodeID = node.x + node.y * GRID_WIDTH;
 
             if(nodeID<0 || nodeID>=openListMask.Count)
@@ -450,7 +464,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             openList.Add(node);
         }
 
-        public void addToOpenList(Vector2 position, PathNode parent)
+        public void addToOpenList(Vector2i position, PathNode parent)
         {
             addGridPosToOpenList(position, parent);
         }
@@ -459,6 +473,12 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
         {
             return isGridNodeOccupied((int)pos.X, (int)pos.Y);
         }
+
+        public bool isGridNodeOccupied(Vector2i pos)
+        {
+            return isGridNodeOccupied((int)pos.X, (int)pos.Y);
+        }
+
         public bool isGridNodeOccupied(int x, int y)
         {
             if ((x >= 0 && x < GRID_SIZE) && (y >= 0 && y < GRID_SIZE))
@@ -521,7 +541,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
                     if (!(i.Value is Minion) && !(i.Value is Champion))
                         continue;
 
-                    Vector2 gridPos = fromPositionToGrid(i.Value.getPosition()); // get the position in grid size
+                    Vector2i gridPos = fromPositionToGrid(i.Value.getPosition()); // get the position in grid size
 
                     int radius = ((int)Math.Ceiling((float)i.Value.getCollisionRadius() / (float)PATH_DEFAULT_BOX_SIZE(mesh.getSize()))) / 2; // How many boxes does the radius of this object cover?
 
@@ -545,7 +565,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             List<Vector2> ret = new List<Vector2>();
             foreach (Vector2i gridPos in rawPath)
             {
-                ret.Add(fromGridToPosition(new Vector2(gridPos.x, gridPos.y)));
+                ret.Add(fromGridToPosition(new Vector2(gridPos.X, gridPos.Y)));
             }
             return ret;
         }
@@ -583,7 +603,26 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
     }
     class PathNode
     {
-        public int x, y, h, g;
+        //compatibility methods for old code
+        public int x
+        {
+            get { return position.X; }
+            set { position.X = value; }
+        }
+
+        public int y
+        {
+            get { return position.Y; }
+            set { position.Y = value; }
+        }
+        
+       
+
+        public Vector2i position;
+
+        public float h; //heuristic distance to target
+        public float g; //calculated distance from origin
+
         public PathNode parent;
         private static int tableInitialised;
         private const int TABLE_SIZE = (2 << 15);
@@ -594,27 +633,26 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             InitTable();
         }
 
-        public PathNode(int ax, int ay, int ag, int ah, PathNode p)
+        public PathNode(int x, int y, float ag, float ah, PathNode p)
         {
-            Init(ax, ay, ag, ah, p);
+            Init(new Vector2i(x,y), ag, ah, p);
         }
 
-        public PathNode(Vector2 pos, int ag, int ah, PathNode p)
+        public PathNode(Vector2i pos, float ag, float ah, PathNode p)
         {
-            Init((int)pos.X, (int)pos.Y, ag, ah, p);
+            Init(pos, ag, ah, p);
         }
 
-        public void Init(int ax, int ay, int ag, int ah, PathNode p)
+        public void Init(Vector2i pos, float ag, float ah, PathNode p)
         {
             InitTable();
-            x = ax;
-            y = ay;
+            position = pos;
             h = ah;
             g = ag;
             parent = p;
         }
 
-        public void setScore(int ah, int ag)
+        public void setScore(float ah, float ag)
         {
             g = ag;
             h = ah;

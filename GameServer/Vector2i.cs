@@ -12,19 +12,24 @@ namespace LeagueSandbox.GameServer
     /// </summary>
     class Vector2i
     {
-        public int x;
-        public int y;
+        public int X;
+        public int Y;
 
         public Vector2i()
         {
-            x = 0;
-            y = 0;
+            X = 0;
+            Y = 0;
         }
 
+        public Vector2i(Vector2 floatVec)
+        {
+            this.X = (int)floatVec.X;
+            this.Y = (int)floatVec.Y;
+        }
         public Vector2i(int x, int y)
         {
-            this.x = x;
-            this.y = y;
+            this.X = x;
+            this.Y = y;
         }
     }
 }

@@ -81,7 +81,7 @@ namespace LeagueSandbox
             }
            foreach (Vector2i node in pathPoints)
            {
-                bitmap.SetPixel(node.x, GRID_HEIGHT - 1 - node.y, Color.Blue); //Display path nodes blue
+                bitmap.SetPixel(node.X, GRID_HEIGHT - 1 - node.Y, Color.Blue); //Display path nodes blue
             }
 
            try
@@ -90,7 +90,7 @@ namespace LeagueSandbox
             }
            catch (System.Exception ex)
            {
-                Logger.LogCoreError("Could not save debug bitmap");
+                Logger.LogCoreError("Could not save debug bitmap"+ex);
            }
             
            

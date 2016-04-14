@@ -265,6 +265,9 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
 
             ret.Reverse();
 
+            if(Pathfinder.debugMove)
+              DebugHelper.getInstance().ImageFromPath(ref openList, ref closedList,ref ret,ref map,GRID_WIDTH,GRID_HEIGHT);
+           
             return ret;
         }
 

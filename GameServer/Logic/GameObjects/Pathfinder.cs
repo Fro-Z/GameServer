@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 using LeagueSandbox.GameServer;
+using System.Collections;
 
 namespace LeagueSandbox.GameServer.Logic.GameObjects
 {
@@ -20,7 +21,9 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
         protected static int totalDuration = 0, durations = 0;
         protected static DateTime g_Clock = System.DateTime.Now;
         protected static bool debugOutput = false;
-        protected static int MAX_PATHFIND_TRIES = 1000;
+        protected static int MAX_PATHFIND_TRIES = 3000; /// Max ammount of nodes to open when searching path
+
+        public static bool debugMove = true;
 
         public Pathfinder()/*:mesh(0),chart(0)*/ { }
 
@@ -53,17 +56,14 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             job.addToOpenList(job.start, null); // Let's start at the start.
 
             int tries;
-            for (tries = 0; job.openList.Count != 0; tries++) // Go through the open list while it's not empty
+            for (tries = 0; job.getOpenNodeCount() != 0; tries++) // Go through the open list while it's not empty
             {
                 if (debugOutput)
-                    Logger.LogCoreInfo("Going through openlist. Tries: " + tries + " | Objects on list: " + job.openList.Count);
+                    Logger.LogCoreInfo("Going through openlist. Tries: " + tries + " | Objects on list: " + job.getOpenNodeCount());
 
 
                 if (tries == MAX_PATHFIND_TRIES)
                 {
-                  //  LeagueSandbox.GameDeubgger.getInstance().PingAtLocation(job.fromGridToPosition(job.start), Core.Logic.PacketHandlers.Packets.Pings.Ping_Assist);
-                  //  LeagueSandbox.GameDeubgger.getInstance().PingAtLocation(job.fromGridToPosition(job.destination), Core.Logic.PacketHandlers.Packets.Pings.Ping_Assist);
-
                     path.error = PathError.PATH_ERROR_OUT_OF_TRIES;
                     oot++;
                     //CORE_WARNING("PATH_ERROR_OUT_OF_TRIES");
@@ -92,7 +92,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             }
 
             if (debugOutput)
-                Logger.LogCoreInfo("Going through openlist. Tries: " + tries + " | Objects on list: " + job.openList.Count);
+                Logger.LogCoreInfo("Going through openlist. Tries: " + tries + " | Objects on list: " + job.getOpenNodeCount());
 
             //OpenList is now empty, most likely caused by searching for a path from invalid location
             Logger.LogCoreWarning("PATH_ERROR_OPENLIST_EMPTY from:" + job.start + " to:" + job.destination);
@@ -110,6 +110,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             {
                 Logger.LogCoreError("Can't get path because of a missing AIMesh.");
             }
+            
             return getPath(from, to, PATH_DEFAULT_BOX_SIZE(getMesh().getSize()));
         }
         public static void setMap(Map map)// { chart = map; mesh = chart->getAIMesh(); }
@@ -125,10 +126,12 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             }
             return chart.getAIMesh();
         }
+        
         private static float PATH_DEFAULT_BOX_SIZE(float map_size)
         {
             return map_size / (float)GRID_SIZE;
         }
+
         /// <summary>
         /// Returns all occupied points in area. (Used for debug)
         /// </summary>
@@ -190,7 +193,10 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
         private static int GRID_SIZE = 1024;
         private static int GRID_WIDTH = GRID_SIZE;
         private static int GRID_HEIGHT = GRID_SIZE;
-        public List<PathNode> openList, closedList;
+        private List<PathNode> openList, closedList;
+        private BitArray openListMask;
+        private BitArray closedListMask;
+
         public Grid[,] map = new Grid[GRID_WIDTH, GRID_HEIGHT];
         public Vector2 start, destination;
 
@@ -198,13 +204,21 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
         {
             openList = new List<PathNode>();
             closedList = new List<PathNode>();
+            openListMask = new BitArray(GRID_WIDTH * GRID_HEIGHT);
+            closedListMask = new BitArray(GRID_WIDTH * GRID_HEIGHT);
+
             start = new Vector2();
             destination = new Vector2();
             for (var i = 0; i < GRID_WIDTH; i++)
                 for (var j = 0; j < GRID_HEIGHT; j++)
                     map[i, j] = new Grid();
+
         }
 
+        public int getOpenNodeCount()
+        {
+            return openList.Count;
+        }
         public Vector2 fromGridToPosition(Vector2 position)
         {
             AIMesh mesh = Pathfinder.getMesh();
@@ -247,7 +261,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             {
                 ret.Add(new Vector2i(last.x, last.y));
                 last = last.parent;
-            } while (last.parent != null);
+            } while (last != null);
 
             ret.Reverse();
 
@@ -285,7 +299,8 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
                      pathnode = node;
                  }
              }
-            
+
+           
              return reconstructPathFromNode(pathnode);
            
         }
@@ -334,11 +349,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
 
                 prevPoint = currentPoint;
             }
-
-            // CORE_WARNING("Done cleaning. New size is %d", path.waypoints.size());
-            if (startSize != path.Count())
-                Logger.LogCoreWarning("Removed %d nodes"+ (startSize - path.Count()));
-
+ 
             path = cleanedPath;
         }
         public bool traverseOpenList(bool first)
@@ -358,9 +369,6 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             openList.RemoveAt(openList.Count - 1);
 
 
-            //DEBUG ping at this node
-          //  LeagueSandbox.GameDeubgger.getInstance().PingAtLocation(fromGridToPosition(new Vector2(currentNode.x, currentNode.y)), Core.Logic.PacketHandlers.Packets.Pings.Ping_Assist);
-
             bool atDestination = (Math.Abs(currentNode.x - (int)destination.X) <= 1 && Math.Abs(currentNode.y - (int)destination.Y) <= 1);
 
             if (!atDestination) // While we're not there
@@ -373,7 +381,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
                         {
                             if (!(dx == 0 && dy == 0)) // in all 8 directions, ignore the x==y==0 where we dont move
                             {
-                                if (!isGridNodeOccupied(currentNode.x + dx, currentNode.y + dy)) // Is something here?
+                                if (!isGridNodeOccupied(currentNode.x + dx, currentNode.y + dy) && !isNodeClosed(currentNode.x + dx, currentNode.y + dy)) // Is something here?
                                 {
                                     PathNode conflictingNode = isNodeOpen(currentNode.x + dx, currentNode.y + dy); // Nothing is here, did we already add this to the open list?
                                     if (conflictingNode == null) // We did not, add it
@@ -393,17 +401,21 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             }
 
 
-            closedList.Add(currentNode);
+           
+            closeNode(currentNode);
             return atDestination;
         }
 
         /// <summary>
-        /// Calculates squared distance between two points
+        /// Heuristic function for pathfinding
+        /// Calculates distance between two points
         /// </summary>
         /// <returns>Squared distance</returns>
         public float CALC_H(float CURX, float CURY, float ENDX, float ENDY)
         {
-            return Math.Abs(CURX - ENDX) + Math.Abs(CURY - ENDY);
+            float distX = Math.Abs(CURX - ENDX);
+            float distY = Math.Abs(CURY - ENDY);
+            return (float)Math.Pow(Math.Sqrt(distX*distX + distY*distY),1.5f);
         }
         /// <summary>
         /// Calculates grid distance
@@ -423,7 +435,16 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
 
         public void addGridPosToOpenList(Vector2 position, PathNode parent)
         {
-            openList.Add(new PathNode(position, (int)CALC_G((parent != null) ? (parent.g) : (0)), (int)CALC_H(position.X, position.Y, destination.X, destination.Y), parent));
+            PathNode node = new PathNode(position, (int)CALC_G((parent != null) ? (parent.g) : (0)), (int)CALC_H(position.X, position.Y, destination.X, destination.Y), parent);
+            int nodeID = node.x + node.y * GRID_WIDTH;
+
+            if(nodeID<0 || nodeID>=openListMask.Count)
+            {
+                Logger.LogCoreError("Pathfinder: opening node with invalid nodeID. x:" + node.x + " y:" + node.y);
+                return;
+            }
+            openListMask.Set(nodeID, true);
+            openList.Add(node);
         }
 
         public void addToOpenList(Vector2 position, PathNode parent)
@@ -443,16 +464,27 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             }
             else return true;
         }
+        /// <summary>
+        /// Is node with specified coordinates open?
+        /// </summary>
+        /// <param name="x"></param>
+        /// <param name="y"></param>
+        /// <returns></returns>
         public PathNode isNodeOpen(int x, int y)
         {
-            // TODO: Optimise? This is where the application is residing in 96% of the time during pathfinding.
-
-            // It checks if we've already added this x and y to the openlist. If we did, return it. 
-            foreach (var i in openList)
+            int nodeID = x + y * GRID_WIDTH;
+            if(openListMask.Get(nodeID))
             {
-                if (i.x == x && i.y == y)
-                    return i;
+                //TODO: further optimize lookoop. (Maybe hashtable?)
+                foreach (var i in openList)
+                {
+                    if (i.x == x && i.y == y)
+                        return i;
+                }
             }
+
+
+           
 
             return null;
         }
@@ -498,51 +530,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
                 }
             }
 
-            /*  if (debugOutput())
-              {
-                  auto width = GRID_WIDTH;
-                  auto height = GRID_HEIGHT;
-  #define MIN(a,b) (((a)>(b))?(b):(a))
-  #define MAX(a,b) (((a)>(b))?(a):(b))
-                  std::ofstream imageFile("..\\..\\test.tga", std::ios::out | std::ios::binary);
-                  if (!imageFile) return;
-
-                  // The image header
-                  unsigned char header[18] = { 0 };
-                  header[2] = 1;  // truecolor
-                  header[12] = width & 0xFF;
-                  header[13] = (width >> 8) & 0xFF;
-                  header[14] = height & 0xFF;
-                  header[15] = (height >> 8) & 0xFF;
-                  header[16] = 24;  // bits per pixel
-
-                  imageFile.write((const char*)header, 18);
-
-                  //for (int y = 0; y < height; y++)
-                  for (int y = height - 1; y >= 0; y--)
-                      for (int x = 0; x < width; x++)
-                      {
-                          // blue
-                          imageFile.put(map[x][y].occupied * 128);
-                          // green 
-                          imageFile.put(map[x][y].occupied * 128);
-                          // red 
-                          imageFile.put(map[x][y].occupied * 128);
-                      }
-
-                  // The file footer. This part is totally optional.
-                  static const char footer[26] =
-                      "\0\0\0\0"  // no extension area
-
-              "\0\0\0\0"  // no developer directory
-
-              "TRUEVISION-XFILE"  // Yep, this is a TGA file
-
-              ".";
-                  imageFile.write(footer, 26);
-
-                  imageFile.close();
-              }*/
+        
         }
         private static float PATH_DEFAULT_BOX_SIZE(float map_size)
         {
@@ -557,6 +545,27 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
                 ret.Add(fromGridToPosition(new Vector2(gridPos.x, gridPos.y)));
             }
             return ret;
+        }
+
+        private bool isNodeClosed(int nodeX, int nodeY)
+        {
+            int nodeID = nodeX + nodeY * GRID_WIDTH;
+            return closedListMask.Get(nodeID);
+        }
+
+        private void closeNode(PathNode node)
+        {
+            closedList.Add(node);
+            int nodeID = node.x + GRID_WIDTH * node.y;
+
+            if(nodeID<0 ||nodeID>=closedListMask.Count)
+            {
+                Logger.LogCoreError("Pathfinder: closing node with invalid nodeID. x:" + node.x + " y:" + node.y);
+                return;
+            }
+
+            closedListMask.Set(nodeID, true);
+            openListMask.Set(nodeID, false);
         }
 
     }

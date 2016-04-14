@@ -64,23 +64,20 @@ namespace LeagueSandbox.GameServer.Core.Logic.PacketHandlers.Packets
             Vector2 champTarget= new Vector2(request.x, request.y) ;
 
 
-            LeagueSandbox.GameDeubgger.getInstance().game = game;
-            LeagueSandbox.GameDeubgger.getInstance().peer = peer;
             GameServer.Logic.GameObjects.Path path = Pathfinder.getPath(champPos,champTarget);
             if(path.isPathed())
             {
                 vMoves = path.getWaypoints();
                 vMoves[0] = champPos; //otherwise first path waypoint would be snapped to grid
 
-                peerInfo.getChampion().setWaypoints(vMoves);
-
-               
-                foreach (Vector2 pos in vMoves)
+                if(Pathfinder.debugMove)
+                foreach(Vector2 pos in vMoves)
                 {
-                    var response = new AttentionPingAns(game.getPeerInfo(peer), new AttentionPing { x = pos.X, y = pos.Y, targetNetId = 0, type = Pings.Ping_Danger });
-                    PacketHandlerManager.getInstace().broadcastPacketTeam(game.getPeerInfo(peer).getTeam(), response, Channel.CHL_S2C);
+                        var response = new AttentionPingAns(game.getPeerInfo(peer), new AttentionPing { x = pos.X, y = pos.Y, targetNetId = 0, type = Pings.Ping_Danger });
+                        PacketHandlerManager.getInstace().broadcastPacketTeam(game.getPeerInfo(peer).getTeam(), response, Channel.CHL_S2C);
                 }
 
+                peerInfo.getChampion().setWaypoints(vMoves);
             }
             else
             {

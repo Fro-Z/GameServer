@@ -13,6 +13,8 @@ using System.Threading.Tasks;
 using static ENet.Native;
 using System.Drawing;
 using LeagueSandbox.GameServer;
+using Priority_Queue;
+using System.Collections;
 
 namespace LeagueSandbox
 {
@@ -50,7 +52,7 @@ namespace LeagueSandbox
             PacketHandlerManager.getInstace().broadcastPacketTeam(game.getPeerInfo(peer).getTeam(), response, Channel.CHL_S2C);
         }
 
-        public void ImageFromPath(List<PathNode> openList,List<PathNode> closedList,List<Vector2i> pathPoints,Grid[,] map,int GRID_WIDTH,int GRID_HEIGHT)
+        public void ImageFromPath(SimplePriorityQueue<PathNode> openList,List<PathNode> closedList,List<Vector2i> pathPoints,Grid[,] map, int GRID_WIDTH,int GRID_HEIGHT)
         {
             Bitmap bitmap = new Bitmap(GRID_WIDTH, GRID_HEIGHT);
             
@@ -79,7 +81,7 @@ namespace LeagueSandbox
 
             foreach (PathNode node in openList)
             {
-                bitmap.SetPixel(node.x, GRID_HEIGHT - 1 - node.y, Color.Green); //Display open nodes green
+                bitmap.SetPixel(node.x, GRID_HEIGHT - 1 - node.y, Color.Yellow); //Display open nodes green
             }
 
             foreach (Vector2i node in pathPoints)

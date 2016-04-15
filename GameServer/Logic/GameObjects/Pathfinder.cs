@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 
 using LeagueSandbox.GameServer;
 using System.Collections;
+using Priority_Queue;
+using System.Diagnostics;
 
 namespace LeagueSandbox.GameServer.Logic.GameObjects
 {
@@ -21,11 +23,14 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
         protected static int totalDuration = 0, durations = 0;
         protected static DateTime g_Clock = System.DateTime.Now;
         protected static bool debugOutput = false;
-        protected static int MAX_PATHFIND_TRIES = 3000; /// Max ammount of nodes to open when searching path
+        protected static int MAX_PATHFIND_TRIES = 1000; /// Max ammount of nodes to open when searching path
 
-        public static bool debugMove = false;
+        public static bool debugMove = true;
+        public static bool ignoreUnits = true;
 
         public Pathfinder()/*:mesh(0),chart(0)*/ { }
+
+
 
         public static Path getPath(Vector2 from, Vector2 to, float boxSize)
         {
@@ -75,7 +80,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
                     job.cleanLists();
                     return path;
                 }
-                else if (job.traverseOpenList(tries == 0))
+                else if (job.traverseOpenListJMP())
                 {
                     path.error = PathError.PATH_ERROR_NONE;
                     successes++;
@@ -110,8 +115,14 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             {
                 Logger.LogCoreError("Can't get path because of a missing AIMesh.");
             }
-            
-            return getPath(from, to, PATH_DEFAULT_BOX_SIZE(getMesh().getSize()));
+
+            Stopwatch sw = new Stopwatch();
+            sw.Start();
+            Path p = getPath(from, to, PATH_DEFAULT_BOX_SIZE(getMesh().getSize()));
+            sw.Stop();
+            Logger.LogCoreInfo("Pathfinding took " + sw.ElapsedMilliseconds + "ms");
+
+            return p;
         }
         public static void setMap(Map map)// { chart = map; mesh = chart->getAIMesh(); }
         {
@@ -132,41 +143,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             return map_size / (float)GRID_SIZE;
         }
 
-        /// <summary>
-        /// Returns all occupied points in area. (Used for debug)
-        /// </summary>
-        /// <param name="position"></param>
-        /// <returns></returns>
-        public static List<Vector2> GetOccupiedPoints(Vector2 position)
-        {
-            PathJob job = new PathJob();
-            job.insertObstructions(chart, getMesh()); // Ready the map.
-
-            const float step = 60;
-            const int stepCount = 30;
-
-            List<Vector2> pointsToTest = new List<Vector2>();
-
-            Vector2 start = new Vector2(position.X - (stepCount / 2) * step, position.Y - (stepCount / 2));
-            //generate points for test
-            for (int i=0;i<stepCount;i++)
-                for(int j=0;j<stepCount;j++)
-                {
-                    Vector2 point = start + new Vector2(i * step, j * step);
-                    pointsToTest.Add(point);
-                }
-
-            List<Vector2> result = new List<Vector2>();
-            foreach (Vector2 point in pointsToTest)
-            {
-                Vector2i transformed = job.fromPositionToGrid(point);
-                if (job.isGridNodeOccupied(transformed))
-                    result.Add(point);
-
-            }
-            return result;
-        }
-
+ 
     }
     class Path
     {
@@ -181,7 +158,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
         {
             return error;
         }
-        //std::vector<Vector2> getWaypoints() { return waypoints; }
+
         public List<Vector2> getWaypoints()
         {
             return waypoints;
@@ -190,22 +167,28 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
 
     class PathJob
     {
-        private static int GRID_SIZE = 1024;
+        private static int GRID_SIZE = 512;
         private static int GRID_WIDTH = GRID_SIZE;
         private static int GRID_HEIGHT = GRID_SIZE;
-        private List<PathNode> openList, closedList;
+        private SimplePriorityQueue<PathNode> openList;
+        private List<PathNode> closedList;
         private BitArray openListMask;
         private BitArray closedListMask;
 
-        public Grid[,] map = new Grid[GRID_WIDTH, GRID_HEIGHT];
+
+        public Grid[,] map;
+
         public Vector2i start, destination;
 
         public PathJob()
         {
-            openList = new List<PathNode>();
+            openList = new SimplePriorityQueue<PathNode>();
             closedList = new List<PathNode>();
             openListMask = new BitArray(GRID_WIDTH * GRID_HEIGHT);
             closedListMask = new BitArray(GRID_WIDTH * GRID_HEIGHT);
+
+
+            map = new Grid[GRID_WIDTH, GRID_HEIGHT];
 
             start = new Vector2i();
             destination = new Vector2i();
@@ -264,10 +247,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             } while (last != null);
 
             ret.Reverse();
-
-            if(Pathfinder.debugMove)
-              DebugHelper.getInstance().ImageFromPath(openList, closedList,ret, map,GRID_WIDTH,GRID_HEIGHT);
-           
+          
             return ret;
         }
 
@@ -296,16 +276,15 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
 
             foreach (PathNode node in closedList)
              {
-                 if (node.g+node.h < lowestScore)
+                 if (node.getScore() < lowestScore)
                  {
-                     lowestScore = node.g+node.h;
+                     lowestScore = node.getScore();
                      pathnode = node;
                  }
              }
 
            
-             return reconstructPathFromNode(pathnode);
-           
+             return reconstructPathFromNode(pathnode);  
         }
 
         /// <summary>
@@ -355,91 +334,173 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
  
             path = cleanedPath;
         }
-        public bool traverseOpenList(bool first)
+
+        /// <summary>
+        /// Traverses graph using Jump Point Search algorithm
+        /// </summary>
+        /// <returns>true if opened node was the destination node</returns>
+        public bool traverseOpenListJMP()
         {
             if (openList.Count == 0)
-            {
                 return false;
-            }
 
-            // This sorts every iteration, which means that everything but the last couple of elements are sorted.
-            // TODO: That means, this can probably be optimised. Sort only the last elements and add them into the vector where they belong.
-            // But honestly, it's running pretty fast so why bother
-            openList.Sort((a, b) => (b.g + b.h).CompareTo(a.g + a.h));
+            PathNode currentNode = openList.First;
 
+            openList.Remove(currentNode);
+                       
 
-            PathNode currentNode = openList.Last();
-            openList.RemoveAt(openList.Count - 1);
+            bool atDestination = false;
 
+            if (currentNode.position == destination)
+                atDestination = true;
 
-            bool atDestination = (Math.Abs(currentNode.x - (int)destination.X) <= 1 && Math.Abs(currentNode.y - (int)destination.Y) <= 1);
+            Vector2i parentPos = currentNode.position;
+            if (currentNode.parent != null)
+                parentPos = currentNode.parent.position;
 
-            if (!atDestination) // While we're not there
+            if(!atDestination)
             {
-                for (int dx = -1; dx <= 1; dx++)
+                List<Vector2i> neightbours = getNeighbours(currentNode.position, parentPos);
+                foreach (Vector2i neighbour in neightbours)
                 {
-                    if (currentNode.x + dx >= 0 && currentNode.x + dx < GRID_WIDTH) // Search in 8 directions, but we're supposed to stay in map
-                    {
-                        for (int dy = -1; dy <= 1; dy++)
-                        {
-                            if (!(dx == 0 && dy == 0)) // in all 8 directions, ignore the x==y==0 where we dont move
-                            {
-                                if (!isGridNodeOccupied(currentNode.x + dx, currentNode.y + dy) && !isNodeClosed(currentNode.x + dx, currentNode.y + dy)) // Is something here?
-                                {
-                                    PathNode conflictingNode = isNodeOpen(currentNode.x + dx, currentNode.y + dy); // Nothing is here, did we already add this to the open list?
-                                    if (conflictingNode == null) // We did not, add it
-                                    {
-                                        addToOpenList(new Vector2i(currentNode.x + dx, currentNode.y + dy), currentNode);
-                                    }
-                                    else if (conflictingNode.g > calcNodeG(conflictingNode.position, currentNode.position, currentNode.g)) // I found a shorter route to this node.
-                                    {
-                                        conflictingNode.setParent(currentNode); // Give it a new parent
-                                        float nodeDist = calcNodeG(conflictingNode.position, currentNode.position, currentNode.g);
-                                        conflictingNode.setScore(calcNodeH(conflictingNode.x, conflictingNode.y, destination.X, destination.Y), nodeDist); // set the new score.
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    if (isNodeOpen(neighbour) || isNodeClosed(neighbour))
+                        continue;
+
+                    Vector2i direction = neighbour - currentNode.position;
+
+                    if (jump(currentNode, direction))
+                        break;
+
                 }
             }
+         
 
-
-           
             closeNode(currentNode);
             return atDestination;
         }
-
       
         /// <summary>
-        /// Heuristic function for pathfinding
-        /// Calculates euclidean distance between two points
+        /// Jumps from node in direction
         /// </summary>
-        /// <returns>Squared distance</returns>
-        public float calcNodeH(float CURX, float CURY, float ENDX, float ENDY)
+        /// <returns>true if new node is destination node</returns>
+        private bool jump(PathNode from,Vector2i direction)
         {
-            float distX = Math.Abs(CURX - ENDX);
-            float distY = Math.Abs(CURY - ENDY);
-            return (float)Math.Sqrt(distX*distX + distY*distY);
+            direction = Vector2i.Clamp(direction, -1, 1);
+
+            Vector2i curPos = from.position;
+
+           
+
+            do
+            {
+                curPos += direction;
+
+                if (isGridNodeOccupied(curPos))
+                    return false;
+
+                if (curPos == destination)
+                {
+                    addToOpenList(curPos, from);
+                    return true;
+                }
+
+                //Diagonal case
+                if (direction.X != 0 && direction.Y != 0)
+                {
+                    if (diagonalNeighbourCheck(curPos, direction))
+                    {
+                        if(!isNodeClosed(curPos) && !isNodeOpen(curPos))
+                            addToOpenList(curPos, from);
+                        return false;
+                    }
+
+                    Vector2i horizontalDir = direction;
+                    horizontalDir.Y = 0;
+                    Vector2i verticalDir = direction;
+                    verticalDir.X = 0;
+
+                    // Check in horizontal and vertical directions for forced neighbors
+                    // This is a special case for diagonal direction
+                    if (testJump(curPos, horizontalDir) || testJump(curPos, verticalDir))
+                    {
+                        if (!isNodeClosed(curPos) && !isNodeOpen(curPos))
+                            addToOpenList(curPos, from);
+                        return false;
+                    }
+
+                }
+                else //Non-diagonal case
+                {
+                    if (nonDiagonalNeighbourCheck(curPos, direction))
+                    {
+                        if (!isNodeClosed(curPos) && !isNodeOpen(curPos))
+                            addToOpenList(curPos, from);
+                        return false;
+                    }
+                }
+
+            //Continue until we find either wall or a forced neighbour   
+            }
+            while (true);
+
+            return false;
         }
 
+
         /// <summary>
-        /// Calculates real distance from origin node (only for adjacent nodes)
-        /// (Parent's distance + 1) or +sqrt(2) if diagonal
+        /// Non-diagonal only jump function, that does not create new nodes
+        /// </summary>
+        /// <param name="currentPos"></param>
+        /// <param name="direction"></param>
+        /// <returns>true if found a forced neighbour</returns>
+        private bool testJump(Vector2i currentPos,Vector2i direction)
+        {
+            if(direction.X!=0 && direction.Y!=0)
+            {
+                Logger.LogCoreError("PathfindingError: Non diagonal fuction called with diagonal direction!");
+                return false;
+            }
+
+            Vector2i nextPos = currentPos;
+
+            do
+            {
+                nextPos += direction;
+
+                if (isGridNodeOccupied(nextPos))
+                    return false;
+
+                if (nextPos == destination)
+                    return true;
+
+            }
+            while (!nonDiagonalNeighbourCheck(nextPos, direction)); //run until we either find forced neighbour or a wall
+
+            return true;
+        }
+
+
+
+        /// <summary>
+        /// Heuristic function for pathfinding
+        /// Using euclidean distance between two points
+        /// </summary>
+        /// <returns>Squared distance</returns>
+        public float calcNodeH(Vector2i from,Vector2i to)
+        {
+            return Vector2i.EuclideanDist(from, to);
+        }
+
+
+       
+        /// <summary>
+        /// Calculates real distance from origin node (only for straight lines and diagonals)
         /// </summary>
         /// <param name="PARENT_G">grid distance of parent node</param>
         /// <returns></returns>
         public float calcNodeG(Vector2i nodePos, Vector2i parentPos,float parentDist)
         {
-            if(nodePos.X==parentPos.X ||nodePos.Y==parentPos.Y)
-            {
-                return parentDist + 1;
-            }
-            else
-            { //movement was diagonal
-                return parentDist + (float)Math.Sqrt(2);
-            }
-            
+            return Vector2i.EuclideanDist(parentPos, nodePos)+parentDist;   
         }
 
         public void addRealPosToOpenList(Vector2 position, PathNode parent)
@@ -454,16 +515,29 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             if(parent!=null)
                 nodeDist = calcNodeG(position,parent.position,parent.g);
 
-            PathNode node = new PathNode(position, nodeDist, (int)calcNodeH(position.X, position.Y, destination.X, destination.Y), parent);
-            int nodeID = node.x + node.y * GRID_WIDTH;
+            PathNode node = new PathNode(position, nodeDist, calcNodeH(position, destination), parent);
+            int nodeIndex = node.x + node.y * GRID_WIDTH;
 
-            if(nodeID<0 || nodeID>=openListMask.Count)
+            if(nodeIndex<0 || nodeIndex>=openListMask.Count)
             {
                 Logger.LogCoreError("Pathfinder: opening node with invalid nodeID. x:" + node.x + " y:" + node.y);
                 return;
             }
-            openListMask.Set(nodeID, true);
-            openList.Add(node);
+
+            if(openListMask.Get(nodeIndex))
+            {
+                Logger.LogCoreError("opening node that is already open!");
+                return;
+            }
+
+            if (closedListMask.Get(nodeIndex))
+            {
+                Logger.LogCoreError("opening node that is already closed!");
+                return;
+            }
+
+            openListMask.Set(nodeIndex, true);
+            openList.Enqueue(node, node.getScore());
         }
 
         public void addToOpenList(Vector2i position, PathNode parent)
@@ -478,7 +552,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
 
         public bool isGridNodeOccupied(Vector2i pos)
         {
-            return isGridNodeOccupied((int)pos.X, (int)pos.Y);
+            return isGridNodeOccupied(pos.X, pos.Y);
         }
 
         public bool isGridNodeOccupied(int x, int y)
@@ -489,30 +563,22 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             }
             else return true;
         }
-        /// <summary>
-        /// Is node with specified coordinates open?
-        /// </summary>
-        /// <param name="x"></param>
-        /// <param name="y"></param>
-        /// <returns></returns>
-        public PathNode isNodeOpen(int x, int y)
+
+        public bool isNodeOpen(Vector2i pos)
         {
-            int nodeID = x + y * GRID_WIDTH;
-            if(openListMask.Get(nodeID))
-            {
-                //TODO: further optimize lookoop. (Maybe hashtable?)
-                foreach (var i in openList)
-                {
-                    if (i.x == x && i.y == y)
-                        return i;
-                }
-            }
-
-
-           
-
-            return null;
+            return isNodeOpen(pos.X, pos.Y);
         }
+        public bool isNodeOpen(int nodeX, int nodeY)
+        {
+            int nodeIndex = nodeX + nodeY * GRID_WIDTH;
+
+            if (nodeIndex < 0)
+                return false;
+
+            return openListMask.Get(nodeIndex);
+        }
+
+       
 
         public void cleanLists()
         {
@@ -521,6 +587,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
         }
         public void insertObstructions(Map chart, AIMesh mesh)
         {
+
             if (mesh != null)
             {
                 // Now to draw the mesh onto the thing.
@@ -533,9 +600,10 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
                                 map[x, y].occupied = true; // This is obstructed   
 
                         }
+
             }
 
-            if (chart != null)
+            if (chart != null && !Pathfinder.ignoreUnits)
             {
                 var objects = chart.getObjects();
                 foreach (var i in objects) // For every object
@@ -572,10 +640,19 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             return ret;
         }
 
+        private bool isNodeClosed(Vector2i pos)
+        {
+            return isNodeClosed(pos.X, pos.Y);
+        }
+
         private bool isNodeClosed(int nodeX, int nodeY)
         {
-            int nodeID = nodeX + nodeY * GRID_WIDTH;
-            return closedListMask.Get(nodeID);
+            int nodeIndex = nodeX + nodeY * GRID_WIDTH;
+
+            if (nodeIndex < 0)
+                return false;
+
+            return closedListMask.Get(nodeIndex);
         }
 
         private void closeNode(PathNode node)
@@ -592,6 +669,174 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             closedListMask.Set(nodeID, true);
             openListMask.Set(nodeID, false);
         }
+
+
+        
+        /// <summary>
+        /// JMP Search:
+        /// Get all neighbours for position that could potentially have shorter path
+        /// through 'from' -> 'position' route
+        /// </summary>
+        /// <param name="position"></param>
+        /// <param name="from"></param>
+        /// <returns></returns>
+        private List<Vector2i> getNeighbours(Vector2i position,Vector2i from)
+        {
+            List<Vector2i> neighbours = new List<Vector2i>();
+            Vector2i dir = Vector2i.Clamp(position - from, -1, 1);
+           
+
+            if(position==from) //first node, add all possible neighbours
+                for (int i = -1; i <= 1; i++)
+                    for (int j = -1; j <= 1; j++)
+                    {
+                        if (!(j == 0 && i == 0))
+                        {
+                            Vector2i newPos = new Vector2i(i, j) + position;
+                                neighbours.Add(newPos);
+                        }
+                            
+                    }
+
+            else
+            {
+                if(dir.Y==0) //horizontal movement
+                {
+                    Vector2i testPos1 = position + new Vector2i(0, 1);
+                    Vector2i testPos2 = position + new Vector2i(0, -1);
+
+                    //Add a node if a way to it is occupied
+                    if (isGridNodeOccupied(testPos1))
+                            neighbours.Add(testPos1 + dir);
+
+                    if (isGridNodeOccupied(testPos2))
+                            neighbours.Add(testPos2 + dir);
+
+                    neighbours.Add(position + dir);
+                }
+                else
+                if(dir.X==0) //vertical movement
+                {
+                    Vector2i testPos1 = position + new Vector2i(1, 0);
+                    Vector2i testPos2 = position + new Vector2i(-1, 0);
+
+                    //Add a node if a way to it is occupied
+                    if (isGridNodeOccupied(testPos1))
+                        neighbours.Add(testPos1 + dir);
+
+                    if (isGridNodeOccupied(testPos2))
+                        neighbours.Add(testPos2 + dir);
+
+                    neighbours.Add(position + dir);
+                }
+                else //diagonal movement
+                {
+                    Vector2i horizontalDir = new Vector2i(dir.X, 0);
+                    Vector2i testPos1 = position - horizontalDir;
+                    Vector2i verticalDir = new Vector2i(0, dir.Y);
+                    Vector2i testPos2 = position - verticalDir;
+
+                  //  if (isGridNodeOccupied(testPos1))
+                   // {
+                        neighbours.Add(testPos1 + dir - horizontalDir);
+                        neighbours.Add(testPos1 + dir);
+                   // }
+                        
+
+                  //  if(isGridNodeOccupied(testPos2))
+                  //  {
+                        neighbours.Add(testPos2 + dir - verticalDir);
+                        neighbours.Add(testPos2 + dir);
+                   // }
+                        
+
+                    neighbours.Add(position + dir);
+                }
+
+            }
+            return neighbours;
+        }
+
+
+        /// <summary>
+        /// JMP Search: Tests if current position has a forced neighbour
+        /// </summary>
+        /// <param name="pos">node position</param>
+        /// <param name="dir">direction of arrival</param>
+        private bool nonDiagonalNeighbourCheck(Vector2i pos, Vector2i dir)
+        {
+            if(Pathfinder.debugMove)
+            {
+                if (dir.X != 0 && dir.Y != 0)
+                    Logger.LogCoreError("nonDiagonalNeighbourCheck ran with diagonal direction!");
+            }
+
+            if(dir.X==0) //vertical direction, test for horizontal occupation
+            {
+                Vector2i testPoint1 = pos + new Vector2i(1, 0);
+                Vector2i testPoint2 = pos + new Vector2i(-1, 0);
+
+                //neighbour is forced if testPoint blocks access to unoccupied node
+                if (isGridNodeOccupied(testPoint1) && !isGridNodeOccupied(testPoint1 + dir))
+                    return true;
+
+                if (isGridNodeOccupied(testPoint2) && !isGridNodeOccupied(testPoint2 + dir))
+                    return true;
+            }
+            else //assume horizontal direction, test for vertical occupation
+            {
+                Vector2i testPoint1 = pos + new Vector2i(0, 1);
+                Vector2i testPoint2 = pos + new Vector2i(0, -1);
+
+                if (isGridNodeOccupied(testPoint1) && !isGridNodeOccupied(testPoint1 + dir))
+                    return true;
+
+                if (isGridNodeOccupied(testPoint2) && !isGridNodeOccupied(testPoint2 + dir))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// JMP Search: Tests if current position has a forced neighbour
+        /// </summary>
+        /// <param name="pos">node position</param>
+        /// <param name="dir">direction of arrival</param>
+        private bool diagonalNeighbourCheck(Vector2i pos, Vector2i dir)
+        {
+            Vector2i horizontalDir = new Vector2i(dir.X, 0);
+            Vector2i testPos1 = pos - horizontalDir;
+            Vector2i verticalDir = new Vector2i(0, dir.Y);
+            Vector2i testPos2 = pos - verticalDir;
+
+            if (isGridNodeOccupied(testPos1))
+            {
+                if (!isGridNodeOccupied(testPos1 + dir - horizontalDir))
+                    return true;
+
+                if (!isGridNodeOccupied(testPos1 + dir))
+                    return true;
+            }
+               
+
+            if (isGridNodeOccupied(testPos2))
+            {
+                if (!isGridNodeOccupied(testPos2 + dir - verticalDir))
+                    return true;
+
+                if (!isGridNodeOccupied(testPos2 + dir))
+                    return true;
+            }
+                
+
+            return false;
+        }
+
+        internal void PrintImage()
+        {
+            DebugHelper.getInstance().ImageFromPath(openList, closedList, new List<Vector2i>(),map, GRID_WIDTH, GRID_HEIGHT);
+        }
+
 
     }
     class Grid
@@ -658,6 +903,11 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
         {
             g = ag;
             h = ah;
+        }
+
+        public float getScore()
+        {
+            return g + h;
         }
 
         public void setParent(PathNode p)

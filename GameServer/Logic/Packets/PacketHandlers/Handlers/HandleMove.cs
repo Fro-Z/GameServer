@@ -63,9 +63,9 @@ namespace LeagueSandbox.GameServer.Core.Logic.PacketHandlers.Packets
             Vector2 champPos = new Vector2(peerInfo.getChampion().getX(), peerInfo.getChampion().getY());
             Vector2 champTarget= new Vector2(request.x, request.y) ;
 
-
             GameServer.Logic.GameObjects.Path path = Pathfinder.getPath(champPos,champTarget);
-            if(path.isPathed())
+
+            if(path.isPathed() || path.error==PathError.PATH_ERROR_OUT_OF_TRIES) //out of tries provide at least aproximate path
             {
                 vMoves = path.getWaypoints();
                 vMoves[0] = champPos; //otherwise first path waypoint would be snapped to grid

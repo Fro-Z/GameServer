@@ -50,60 +50,63 @@ namespace LeagueSandbox
             PacketHandlerManager.getInstace().broadcastPacketTeam(game.getPeerInfo(peer).getTeam(), response, Channel.CHL_S2C);
         }
 
-           public void ImageFromPath(ref List<PathNode> openList,ref List<PathNode> closedList,ref List<Vector2i> pathPoints,ref Grid[,] map,int GRID_WIDTH,int GRID_HEIGHT)
+        public void ImageFromPath(List<PathNode> openList,List<PathNode> closedList,List<Vector2i> pathPoints,Grid[,] map,int GRID_WIDTH,int GRID_HEIGHT)
         {
             Bitmap bitmap = new Bitmap(GRID_WIDTH, GRID_HEIGHT);
             
 
-        //DEBUG
+            //DEBUG
             List<Vector3> imageData = new List<Vector3>();
-           for (int i = 0; i < GRID_HEIGHT; i++) //dump basic image data
-               for (int j = 0; j < GRID_WIDTH; j++)
-               {
-                   if (map[j, i].occupied)
-                       imageData.Add(new Vector3(255, 255, 255));
-                   else
-                       imageData.Add(new Vector3(0, 0, 0));
+            for (int i = 0; i < GRID_HEIGHT; i++) //dump basic image data
+                for (int j = 0; j < GRID_WIDTH; j++)
+                {
+                    if (map[j, i].occupied)
+                        imageData.Add(new Vector3(255, 255, 255));
+                    else
+                        imageData.Add(new Vector3(0, 0, 0));
 
                     Color color = Color.Black;
                     if (map[j, i].occupied)
                         color = Color.White;
 
                     bitmap.SetPixel(j, GRID_HEIGHT-i-1, color);
-               }
-           foreach(PathNode node in closedList)
-           {
-               bitmap.SetPixel(node.x, GRID_HEIGHT-1 - node.y,Color.Red); //Display closed nodes red
-           }
-           foreach (PathNode node in openList)
-           {
+                }
+
+            foreach(PathNode node in closedList)
+            {
+                bitmap.SetPixel(node.x, GRID_HEIGHT-1 - node.y,Color.Red); //Display closed nodes red
+            }
+
+            foreach (PathNode node in openList)
+            {
                 bitmap.SetPixel(node.x, GRID_HEIGHT - 1 - node.y, Color.Green); //Display open nodes green
             }
-           foreach (Vector2i node in pathPoints)
-           {
+
+            foreach (Vector2i node in pathPoints)
+            {
                 bitmap.SetPixel(node.X, GRID_HEIGHT - 1 - node.Y, Color.Blue); //Display path nodes blue
             }
 
-           try
-           {
+            try
+            {
                 bitmap.Save("C:/mapImage.png");
                 Logger.LogCoreInfo("Saved path waypoint route to C:/mapImage.png");
             }
-           catch (System.Exception ex)
-           {
+            catch (System.Exception ex)
+            {
                 Logger.LogCoreError("Could not save debug bitmap"+ex);
                 
-           }
+            }
             
            
         }
 
 
 
-        public Game game;
-       public  ENetPeer* peer;
-        private static DebugHelper _instance;
+            public Game game;
+            public  ENetPeer* peer;
+            private static DebugHelper _instance;
 
-    }
+        }
 
 }

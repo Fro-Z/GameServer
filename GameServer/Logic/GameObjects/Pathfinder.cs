@@ -23,7 +23,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
         protected static bool debugOutput = false;
         protected static int MAX_PATHFIND_TRIES = 3000; /// Max ammount of nodes to open when searching path
 
-        public static bool debugMove = true;
+        public static bool debugMove = false;
 
         public Pathfinder()/*:mesh(0),chart(0)*/ { }
 
@@ -266,7 +266,7 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             ret.Reverse();
 
             if(Pathfinder.debugMove)
-              DebugHelper.getInstance().ImageFromPath(ref openList, ref closedList,ref ret,ref map,GRID_WIDTH,GRID_HEIGHT);
+              DebugHelper.getInstance().ImageFromPath(openList, closedList,ret, map,GRID_WIDTH,GRID_HEIGHT);
            
             return ret;
         }
@@ -391,11 +391,11 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
                                     {
                                         addToOpenList(new Vector2i(currentNode.x + dx, currentNode.y + dy), currentNode);
                                     }
-                                    else if (conflictingNode.g > calcNodeDist(conflictingNode.position, currentNode.position, currentNode.g)) // I found a shorter route to this node.
+                                    else if (conflictingNode.g > calcNodeG(conflictingNode.position, currentNode.position, currentNode.g)) // I found a shorter route to this node.
                                     {
                                         conflictingNode.setParent(currentNode); // Give it a new parent
-                                        float nodeDist = calcNodeDist(conflictingNode.position, currentNode.position, currentNode.g);
-                                        conflictingNode.setScore(CALC_H(conflictingNode.x, conflictingNode.y, destination.X, destination.Y), nodeDist); // set the new score.
+                                        float nodeDist = calcNodeG(conflictingNode.position, currentNode.position, currentNode.g);
+                                        conflictingNode.setScore(calcNodeH(conflictingNode.x, conflictingNode.y, destination.X, destination.Y), nodeDist); // set the new score.
                                     }
                                 }
                             }
@@ -410,24 +410,26 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             return atDestination;
         }
 
+      
         /// <summary>
         /// Heuristic function for pathfinding
-        /// Calculates distance between two points
+        /// Calculates euclidean distance between two points
         /// </summary>
         /// <returns>Squared distance</returns>
-        public float CALC_H(float CURX, float CURY, float ENDX, float ENDY)
+        public float calcNodeH(float CURX, float CURY, float ENDX, float ENDY)
         {
             float distX = Math.Abs(CURX - ENDX);
             float distY = Math.Abs(CURY - ENDY);
-            return (float)Math.Pow(Math.Sqrt(distX*distX + distY*distY),1.5f);
+            return (float)Math.Sqrt(distX*distX + distY*distY);
         }
+
         /// <summary>
-        /// Calculates grid distance from origin node
+        /// Calculates real distance from origin node (only for adjacent nodes)
         /// (Parent's distance + 1) or +sqrt(2) if diagonal
         /// </summary>
         /// <param name="PARENT_G">grid distance of parent node</param>
         /// <returns></returns>
-        public float calcNodeDist(Vector2i nodePos, Vector2i parentPos,float parentDist)
+        public float calcNodeG(Vector2i nodePos, Vector2i parentPos,float parentDist)
         {
             if(nodePos.X==parentPos.X ||nodePos.Y==parentPos.Y)
             {
@@ -450,9 +452,9 @@ namespace LeagueSandbox.GameServer.Logic.GameObjects
             float nodeDist = 0;
 
             if(parent!=null)
-                nodeDist = calcNodeDist(position,parent.position,parent.g);
+                nodeDist = calcNodeG(position,parent.position,parent.g);
 
-            PathNode node = new PathNode(position, nodeDist, (int)CALC_H(position.X, position.Y, destination.X, destination.Y), parent);
+            PathNode node = new PathNode(position, nodeDist, (int)calcNodeH(position.X, position.Y, destination.X, destination.Y), parent);
             int nodeID = node.x + node.y * GRID_WIDTH;
 
             if(nodeID<0 || nodeID>=openListMask.Count)
